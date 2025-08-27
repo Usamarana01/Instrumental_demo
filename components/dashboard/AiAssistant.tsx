@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, Send, Paperclip, X } from 'lucide-react';
 import { MockData, Asset } from '../../types';
-import { GoogleGenAI } from "@google/genai";
+import { generateContentStream } from '../../services/geminiService';
 
 interface AiAssistantProps {
     mockData: MockData;
@@ -90,9 +90,11 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ mockData, getAllAssets, isOpe
             ${JSON.stringify(summarizedAssets, null, 2)}
         `;
 
-        try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+        // Add a placeholder message for streaming
+        const aiMessage: Message = { role: 'assistant', text: '' };
+        setMessages(prev => [...prev, aiMessage]);
 
+        try {
             const contentParts: any[] = [{ text: promptText }];
             if (file) {
                 const base64Data = await readFileAsBase64(file);
@@ -104,15 +106,13 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ mockData, getAllAssets, isOpe
                 });
             }
             
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: { parts: contentParts },
-                ...(systemInstruction && { config: { systemInstruction } }),
+            await generateContentStream(contentParts, systemInstruction, (streamingText) => {
+                setMessages(prev => {
+                    const newMessages = [...prev];
+                    newMessages[newMessages.length - 1] = { role: 'assistant', text: streamingText };
+                    return newMessages;
+                });
             });
-            
-            const aiText = response.text;
-            const aiMessage: Message = { role: 'assistant', text: aiText };
-            setMessages(prev => [...prev, aiMessage]);
 
         } catch (error) {
             console.error("Error in AI Assistant component:", error);
@@ -120,7 +120,11 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ mockData, getAllAssets, isOpe
              if (error instanceof Error) {
                 errorMessage.text = `Error: ${error.message}`;
             }
-            setMessages(prev => [...prev, errorMessage]);
+            setMessages(prev => {
+                const newMessages = [...prev];
+                newMessages[newMessages.length - 1] = errorMessage;
+                return newMessages;
+            });
         } finally {
             setIsLoading(false);
         }
@@ -177,20 +181,13 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ mockData, getAllAssets, isOpe
                         <div className={`p-3 rounded-lg max-w-lg ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}>
                            {msg.imageUrl && <img src={msg.imageUrl} alt="User attachment" className="rounded-md mb-2 max-h-48" />}
                            {msg.text.split('\n').map((line, i) => <p key={i}>{line}</p>)}
+                           {msg.role === 'assistant' && isLoading && index === messages.length - 1 && !msg.text && (
+                               <span className="inline-block w-2 h-5 bg-gray-500 animate-pulse ml-1"></span>
+                           )}
                         </div>
                     </div>
                 ))}
-                {isLoading && (
-                    <div className="flex justify-start">
-                        <div className="p-3 rounded-lg bg-gray-200 dark:bg-gray-700">
-                           <div className="flex items-center space-x-2">
-                                <div className="w-2 h-2 rounded-full bg-gray-500 animate-pulse"></div>
-                                <div className="w-2 h-2 rounded-full bg-gray-500 animate-pulse [animation-delay:0.2s]"></div>
-                                <div className="w-2 h-2 rounded-full bg-gray-500 animate-pulse [animation-delay:0.4s]"></div>
-                           </div>
-                        </div>
-                    </div>
-                )}
+
                  <div ref={messagesEndRef} />
             </div>
 
